@@ -1,0 +1,74 @@
+Major Files:
+1. Makefile - For compiling the code.
+2. mydump.c - Source Code
+
+Compiling Command:
+Either use make for utilizing makefile or "gcc -Wall -Werror mydump.c -o mydump -lpcap"
+
+Run Command:
+sudo ./mydump -h : For Help
+
+sudo ./mydump [-i interface] [-r file] [-s string] expression
+
+sudo ./mydump
+sudo ./mydump -r <filename> -s <string> expression
+sudo ./mydump -i <interface> -s <string> expression
+
+Implementation Details
+Implemented a passive network monitoring application in C using libpcap. The code takes 4 arguments: 1) [-i interface] which lets you decide the interface from which the network traffic needs to be captured. 2) [-r file] which lets you analyse static pcap file. 3) [-s string] which lets you filter traffic based on regex matching in payload. 4) expression which acts as a BPF filter. All the argumenents are optional. Any string argument which contains a space should be passed within double quotes. If no argument is given, then the program finds an interface on the machine and starts capturing traffic from it. We have used custom structs for IP and TCP to ease the calculations for various headers. We have also used a custom implementation of strstr() so that the limitation of strstr to compare only printable characters is handled properly. We are printing the hex and ascii value of the parload with the replacement of non printable characters with dot.
+
+The printing format is:
+<Timestamp(YYYY-MM-DD H:M:S.ms)> <Source MAC Address> -> <Destination MAC Address> type <Ethernet Type> len <Length of Packet>
+<Source IP:Source Port> -> <Destination IP:Destination Port> <Protocol> <TCP Flags/ICMP Type>
+<Payload>
+
+Output:
+ubuntu@ubuntu-VirtualBox:~/Documents$ sudo ./mydump -r hw1.pcap icmp
+2013-01-14 12:42:31.752299  C4:3D:C7:17:6F:9B ->  00:0C:29:E9:94:8E type 0x800 len 90
+1.234.31.20 -> 192.168.0.200 ICMP type 3
+00000   45 00 00 30 00 00 40 00  2e 06 6a 5a c0 a8 00 c8    E..0..@...jZ....
+00016   01 ea 1f 14 00 50 7b 81  bd cd 09 c6 3a 35 22 b0    .....P{.....:5".
+00032   70 12 39 08 11 ab 00 00  02 04 05 b4 01 01 04 02    p.9.............
+
+
+ubuntu@ubuntu-VirtualBox:~/Documents$ sudo ./mydump -r hw1.pcap -s Broadcom udp
+2013-01-12 11:38:16.879530  C4:3D:C7:17:6F:9B ->  01:00:5E:7F:FF:FA type 0x800 len 405
+192.168.0.1:1900 -> 239.255.255.250:1900 UDP
+00000   4e 4f 54 49 46 59 20 2a  20 48 54 54 50 2f 31 2e    NOTIFY * HTTP/1.
+00016   31 0d 0a 48 6f 73 74 3a  20 32 33 39 2e 32 35 35    1..Host: 239.255
+00032   2e 32 35 35 2e 32 35 30  3a 31 39 30 30 0d 0a 43    .255.250:1900..C
+00048   61 63 68 65 2d 43 6f 6e  74 72 6f 6c 3a 20 6d 61    ache-Control: ma
+00064   78 2d 61 67 65 3d 36 30  0d 0a 4c 6f 63 61 74 69    x-age=60..Locati
+00080   6f 6e 3a 20 68 74 74 70  3a 2f 2f 31 39 32 2e 31    on: http://192.1
+00096   36 38 2e 30 2e 31 3a 31  39 30 30 2f 57 46 41 44    68.0.1:1900/WFAD
+00112   65 76 69 63 65 2e 78 6d  6c 0d 0a 4e 54 53 3a 20    evice.xml..NTS: 
+00128   73 73 64 70 3a 61 6c 69  76 65 0d 0a 53 65 72 76    ssdp:alive..Serv
+00144   65 72 3a 20 50 4f 53 49  58 2c 20 55 50 6e 50 2f    er: POSIX, UPnP/
+00160   31 2e 30 20 42 72 6f 61  64 63 6f 6d 20 55 50 6e    1.0 Broadcom UPn
+00176   50 20 53 74 61 63 6b 2f  65 73 74 69 6d 61 74 69    P Stack/estimati
+00192   6f 6e 20 31 2e 30 30 0d  0a 4e 54 3a 20 75 72 6e    on 1.00..NT: urn
+00208   3a 73 63 68 65 6d 61 73  2d 77 69 66 69 61 6c 6c    :schemas-wifiall
+00224   69 61 6e 63 65 2d 6f 72  67 3a 73 65 72 76 69 63    iance-org:servic
+00240   65 3a 57 46 41 57 4c 41  4e 43 6f 6e 66 69 67 3a    e:WFAWLANConfig:
+00256   31 0d 0a 55 53 4e 3a 20  75 75 69 64 3a 46 35 31    1..USN: uuid:F51
+00272   39 33 39 30 41 2d 34 34  44 44 2d 32 39 35 38 2d    9390A-44DD-2958-
+00288   36 32 33 37 2d 45 41 33  37 42 39 38 37 43 33 46    6237-EA37B987C3F
+00304   44 3a 3a 75 72 6e 3a 73  63 68 65 6d 61 73 2d 77    D::urn:schemas-w
+00320   69 66 69 61 6c 6c 69 61  6e 63 65 2d 6f 72 67 3a    ifialliance-org:
+00336   73 65 72 76 69 63 65 3a  57 46 41 57 4c 41 4e 43    service:WFAWLANC
+00352   6f 6e 66 69 67 3a 31 0d  0a 0d 0a                   onfig:1....
+
+
+ubuntu@ubuntu-VirtualBox:~/Documents$ sudo ./mydump ip
+2017-10-14 18:24:13.700718  08:00:27:5F:65:21 ->  52:54:00:12:35:02 type 0x800 len 54
+10.0.2.15:52620 -> 172.217.12.142:80 TCP Flags [*A****]
+2017-10-14 18:24:13.701179  52:54:00:12:35:02 ->  08:00:27:5F:65:21 type 0x800 len 60
+172.217.12.142:80 -> 10.0.2.15:52620 TCP Flags [*A****]
+00000   00 00 00 00 00 00                                   ......
+2017-10-14 18:24:13.828531  08:00:27:5F:65:21 ->  52:54:00:12:35:02 type 0x800 len 54
+10.0.2.15:47104 -> 130.245.27.3:443 TCP Flags [*A****]
+2017-10-14 18:24:13.829026  52:54:00:12:35:02 ->  08:00:27:5F:65:21 type 0x800 len 60
+130.245.27.3:443 -> 10.0.2.15:47104 TCP Flags [*A****]
+00000   00 00 00 00 00 00                                   ......
+
+
