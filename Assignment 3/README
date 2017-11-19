@@ -1,0 +1,87 @@
+Major Files:
+	1. Makefile - For compiling the code.
+	2. proxy.h - Conatins function prototype for ones used across files.
+	3. pbproxy.c - Main file of the code which interacts with the user and accepts input and calls the appropriate mode of pbproxy either client or server.
+	4. server.c - Contains code for pbproxy in Server mode.
+	5. client.c - Contains code for pbproxy in Client mode.
+	6. mykey - Contains the key used for symetric encryption.
+
+Compiling Command:
+	Either use make for utilizing makefile or "gcc -Wall -Werror server.c client.c pbproxy.c -o pbproxy -lcrypto"
+
+System Details:
+	ubuntu@ubuntu-VirtualBox:~$ lsb_release -a
+		No LSB modules are available.
+		Distributor ID:	Ubuntu
+		Description:	Ubuntu 16.04.3 LTS
+		Release:	16.04
+		Codename:	xenial
+
+	ubuntu@ubuntu-VirtualBox:~$ uname -srm
+		Linux 4.4.0-98-generic x86_64
+
+	ubuntu@ubuntu-VirtualBox:~$ gcc --version
+		gcc (Ubuntu 5.4.0-6ubuntu1~16.04.5) 5.4.0 20160609
+
+
+Run Command:
+	./pbproxy -h : For Help
+
+	Proxy Server:
+	./pbproxy [-l port] -k keyfile destination port
+	e.g. --> ./pbproxy -l 8888 -k mykey localhost 22
+
+
+	Proxy Client:
+	./pbproxy -k keyfile destination port
+
+	When using SSH as destination service:
+	e.g. --> ssh -o "ProxyCommand ./pbproxy -k mykey localhost 8888" localhost
+
+	When using a generic service like netcat as destination service:
+	e.g. --> ./pbproxy -k mykey localhost 8888 
+
+
+Design Architecture:
+
+	1. The code parses CLI arguments using "getopt" to figure listening port of the server, location of the key file, destination service(ip or dns) and destination service port.
+
+	2. If listening port is passed then code invokes the proxy server code otherwise executes client code.
+
+	3. As part of connection handshake between server and client, client sends an IV to the server and server on receving this IV generates another IV which it sends back to the client. So there are two different IVs used when making encrypted connection from client to server and when there is reverse flow from server to client.
+
+	4. The proxy server has an idle connection timeout of 120 seconds, i.e. after 120 seconds of inactivity/idleness from client, the server will automatically disconnect the client.
+
+	Server :
+	1. It creates a socket and binds it to server's address to listen on user passed listening port.
+	2. It starts listening for the client connections (MAX connections queue set to 3).
+	3. It accepts the client connection and then opens a socket connection to destination service.
+	4. As part of the first transaction, client sends an IV to the server and server on receiving the IV, generates another IV which it sends back to the client.
+	5. Once the connection is established, server receives data from the client socket and decrypts it and passes it to the service socket. 
+	6. On receiving the response from the service socket, server encrypts the response and passes it to the client socket.
+	7. Steps 5, 6 run in infinite loop until the client connection is terminated (which is basically when client sends 0 bytes).
+	8. Once the cycle for the client breaks, another client can get connected to the server.
+	
+	Client :
+	1. It creates a socket for connecting to server address using destination address and destination port passed by the user.
+	2. As soon as the connection is established, it generates and send an IV to the server and receives back an IV from the server.
+	3. Once the IV exchange is complete, client reads the data from STDIN and encrypts the data and sends it to the server over the socket.
+	4. Client reads the encrypted data from the socket sent by the server, decrypts it and publishes it to the STDOUT.
+	5. Steps 3, 4 run in infinite loop until the connection is terminated or any error occurs.
+
+	Encryption :
+	1. Used 'AES_ctr128_encrypt' to encrypt and decrypt the data over the network using openssl library.
+	2. Used two different random IVs for each way communication between client and server.
+
+	Limitations :
+	1. Used usleep() after writting data over the socket to avoid multiple packets get combined error.
+	2. No concurrent connections are possible, but sequential connections work perfectly.
+
+
+References:
+	1. http://www.binarytides.com/server-client-example-c-sockets-linux/
+	2. https://notes.shichao.io/unp/ch6/
+	3. http://docs.huihoo.com/doxygen/openssl/1.0.1c/crypto_2aes_2aes_8h.html
+	4. http://man7.org/linux/man-pages/man3/usleep.3.html
+
+
