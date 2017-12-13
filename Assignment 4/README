@@ -1,0 +1,287 @@
+Major Files:
+	1. dnsdetect.py - Contains the code for detecting DNS spoofing.
+	2. dnsinject.py - Contains the code for performing DNS spoofing.
+	3. hostnames - Contains domain to spoof ip mappings.
+	4. hw4.pcap - Contains all network traffic during spoofing.
+
+
+System Details:
+	ubuntu@ubuntu-VirtualBox:~$ lsb_release -a
+		No LSB modules are available.
+		Distributor ID:	Ubuntu
+		Description:	Ubuntu 16.04.3 LTS
+		Release:	16.04
+		Codename:	xenial
+
+	ubuntu@ubuntu-VirtualBox:~$ uname -srm
+		Linux 4.10.0-40-generic x86_64
+
+	ubuntu@ubuntu:~$ python3
+		Python 3.5.2 (default, Nov 23 2017, 16:37:01) 
+		[GCC 5.4.0 20160609] on linux
+
+
+Dependencies:
+	sudo apt install python3-pip
+	sudo pip3 install scapy-python3
+	sudo pip3 install netifaces
+
+
+Run Commands:
+	sudo python3 dnsdetect.py --help : For Help
+	sudo python3 dnsinject.py --help : For Help
+
+	DNS Spoof Injector:	
+		sudo dnsinject.py -i <interface> -h <hostnames> <expression>
+
+		sudo python3 dnsinject.py
+		sudo python3 dnsinject.py udp
+		sudo python3 dnsinject.py -i ens33
+		sudo python3 dnsinject.py -i ens33 udp
+		sudo python3 dnsinject.py -i ens33 -h hostnames
+		sudo python3 dnsinject.py -i ens33 -h hostnames udp
+		sudo python3 dnsinject.py -i ens33 -h hostnames "udp port 53"
+
+
+	DNS Spoof Detector:
+		sudo dnsdetect.py -i <interface> -r <tracefile> <expression>
+
+		With Interface:
+		sudo python3 dnsdetect.py
+		sudo python3 dnsdetect.py udp
+		sudo python3 dnsdetect.py -i ens33
+		sudo python3 dnsdetect.py -i ens33 udp
+		sudo python3 dnsdetect.py -i ens33 "udp port 53"
+
+		With Trace File:
+		sudo python3 dnsdetect.py -r hw4.pcap
+
+	
+	Pcap file Generator:
+		sudo tcpdump -i ens33 -w hw4.pcap
+
+
+	DNS Query Generator:
+		dig @8.8.8.8 amazon.com
+		dig @77.88.8.8 amazon.com
+		nslookup amazon.com
+
+
+Design Architecture:
+
+	DNS Spoof Injector:
+		1. The DNS spoof injector is a python script which takes in arguments for interface to listen, hostnames file to get the mapping of domain to spoof ip and a bpf filter expression.
+
+		2. If interface is not provided by the user, the program chooses a default interface for listening the network traffic.
+
+		3. If hostnames file is not provided by the user, the program uses the ip of the system on which its running and spoof all the incoming DNS requests with it.
+
+		4. If bpf filter is provided, then network traffic filtering is done accordingly else everything is sniffed.
+
+		5. Once we start sniffing the packets, for every DNS request, based on the domain to spoof ip mappings available, we construct spoofed packet and send it on the same interface on which the program has sniffed the packet.
+
+		6. In this case, there are two actors, victim and the attacker. Attacker by running the DNS Spoof Injector code will be sniffing on the DNS request packets of the victim and then would be sending forged DNS responses to victim. This is a Man-On-Side attack and attacker has no control over the actual DNS responses coming from DNS server.  
+
+		7. Since this a MoS attack, we will see race condition i.e., based on query made by the victim DNS client will have two responses, one from the attacker and other from the DNS server and which ever reaches the victim's DNS client would be accepted.
+
+		8. The packet construction uses request packet's source MAC, destination MAC, source IP, destination IP, UDP/TCP source port, UDP/TCP destination port, DNS packet id, DNS packet question name, DNS packet question request class and DNS packet question request type while constructing the packet in order to make the packet construction more generic with less hard coded values. Packet will contain spoofed ip in rdata of the answer section with a static ttl value. We can enhance the spoofing with answer with random ttl for each of the packets to avoid attack getting detected easily. Other fields are set by default in Scapy, hence it has not been mentioned in the code while packet construction.
+
+		9. The packet constructor code uses the scapy's suggested way to take care of checksum at the IP and UDP/TCP layer of the packet.
+
+		10. The injection based on the testing takes an average of 20 ms.
+
+		11. The code considers that the DNS requests can be either UDP or TCP but nothing else.
+
+	
+	DNS Spoof Detector:
+		1. The DNS spoof detector is a python script which takes in arguments for interface to listen, trace file for reading a pcap file for detection and a bpf filter expression.
+	
+		2. If interface and trace file is not provided by the user, the program chooses a default interface for listening the network traffic.
+
+		3. If trace file argument is provided by the user, the program uses that file for reading and detection of spoofing.
+
+		4. If bpf filter is provided, then network traffic filtering is done accordingly else everything is sniffed. Given a known bug, bpf filter does not work with scapy in offline mode. Hence when using a trace file in this code, the bpf filter won't work given we have used scapy in this code.
+
+		5. Once we start sniffing the packets, for every DNS request, we create an entry in map using transaction id and domain with an empty list as value. When we sniff on a DNS response, we check if the transaction id and domain exists in the map.
+
+		6. If it does not exist, then we ignore the packet as we don't care about the responses without a request, potentially avoiding the code from DoS attack. We can always add the logic to detect DoS and enhance the detector. 
+
+		7. If it exists, then we check if list if empty, if empty, we create first entry in the list containing the list of rdata values of type A in the answer section and the packet itself, else we check this packet with all the entries the list for ip src and dst, UDP/TCP sport and dport, and list of rdata entries of type A in the answer section. We are assuming that two same requests sent in case of unreliable UDP, will be sent to and answered back by the same DNS server on same port, else we consider it as an anamoly and eventually a spoof.
+
+		8. When we detect a spoof, we add the list of rdata entries of type A in the answer section and packet to the list and also print the message for spoof detection. 
+
+		9. False Positive Detection: 
+			a. To avoid the false positives, we have check for the combination of transaction id and domain to be looked up, given in certain scenarios DNS client might generate more than one request for the same domain and making decisions only at domain name level would lead to genuine requests being flagged as spoof. Even for the requests with same transaction id and domain in the request, we compare the list of all A records in the DNS section of the packet. We do that in order to avoid counting a spoof when the resource records are in different order but the list of rdata entries of type A in the answer section is still same.
+
+			b. There might be valid scenario, where more than one combinations of transaction id and domain are received and the A entries in one of them is the subset of the other. This might look like a valid scenario but implementation of this logic might make our detection logic weaker and hence avoided in our implementation. Consider the scenario, that one of the response has ip1 as the rdata and another has ip0, ip1, ip2, ip3 as the list of rdata values, since we don't know which response is from attacker and which one is from the DNS server, if the second response if from attacker, we will assume that since first is subset of the second one, its a false positive, but its an actual attack where attacker can use one of the correct rdata value to avoid getting detected.
+
+			c. There can be various combinations of intersections and subsets which can be used in implementation which can be act as something to avoid false positives but they will only come at the expense of making the detector weaker.
+
+			d. Another valid scenario are the load balancing DNS servers which send a different domain to ip mapping with considering requests source or transaction id. Even though this will count under a false positive, we have no way to distinguish it from a valid attack.
+
+		10. At this point, the hashmap keeps adding the entries so as to detect all the attacks from different attackers at any point and avoid printing same message for multiple transmission of same packets in case of UDP packets. The current setup can easily scale to a few million entries. As an enhancement a simple LRU/Time Sensitive cache implementation could be combined with the hashmap to cleanup the old entries which is beyond the scope of this assignment.
+
+		11. We have used tcpdump to generate the pcap file for the traffic during dnsinjection and the same file can be used as trace file.   
+
+
+Output of hw4.pcap file using DNS Detector Code:
+	aviral@ubuntu:~$ sudo python3 dnsdetect.py -r hw4.pcap
+		20171211-12:24:31.152376 DNS poisoning attempt
+		TXID 65369 Request www.cs.stonybrook.edu
+		Answer0 ['192.168.66.6']
+		Answer1 ['107.22.178.157']
+
+		20171211-12:24:31.164419 DNS poisoning attempt
+		TXID 47996 Request foo.example.com
+		Answer0 ['10.6.6.6']
+		Answer1 []
+
+		20171211-12:24:31.229526 DNS poisoning attempt
+		TXID 10590 Request bar.example.com
+		Answer0 ['10.6.6.6']
+		Answer1 []
+
+		20171211-12:24:31.451774 DNS poisoning attempt
+		TXID 61476 Request amazon.com
+		Answer0 ['205.251.242.103', '176.32.98.166', '176.32.103.205']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.460346 DNS poisoning attempt
+		TXID 24503 Request amazon.com
+		Answer0 ['205.251.242.103', '176.32.98.166', '176.32.103.205']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.476818 DNS poisoning attempt
+		TXID 33734 Request amazon.com
+		Answer0 ['176.32.98.166', '205.251.242.103', '176.32.103.205']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.488416 DNS poisoning attempt
+		TXID 30803 Request amazon.com
+		Answer0 ['176.32.98.166', '205.251.242.103', '176.32.103.205']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.503803 DNS poisoning attempt
+		TXID 15314 Request google.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['172.217.10.110']
+
+		20171211-12:24:31.515056 DNS poisoning attempt
+		TXID 3459 Request google.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['172.217.12.206']
+
+		20171211-12:24:31.528475 DNS poisoning attempt
+		TXID 32186 Request google.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['172.217.12.206']
+
+		20171211-12:24:31.540467 DNS poisoning attempt
+		TXID 3550 Request google.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['172.217.10.110']
+
+		20171211-12:24:31.553053 DNS poisoning attempt
+		TXID 10627 Request google.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['172.217.10.110']
+
+		20171211-12:24:31.562375 DNS poisoning attempt
+		TXID 19309 Request google.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['172.217.10.110']
+
+		20171211-12:24:31.575261 DNS poisoning attempt
+		TXID 21933 Request google.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['172.217.10.110']
+
+		20171211-12:24:31.598823 DNS poisoning attempt
+		TXID 59236 Request google.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['172.217.12.206']
+
+		20171211-12:24:31.609299 DNS poisoning attempt
+		TXID 62250 Request google.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['172.217.7.14']
+
+		20171211-12:24:31.669933 DNS poisoning attempt
+		TXID 64939 Request twitter.com
+		Answer0 ['104.244.42.65', '104.244.42.1']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.689450 DNS poisoning attempt
+		TXID 6834 Request twitter.com
+		Answer0 ['104.244.42.65', '104.244.42.1']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.707442 DNS poisoning attempt
+		TXID 3817 Request twitter.com
+		Answer0 ['104.244.42.65', '104.244.42.1']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.725869 DNS poisoning attempt
+		TXID 27988 Request twitter.com
+		Answer0 ['104.244.42.193', '104.244.42.65']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.759086 DNS poisoning attempt
+		TXID 49839 Request twitter.com
+		Answer0 ['104.244.42.65', '104.244.42.1']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.785128 DNS poisoning attempt
+		TXID 54388 Request twitter.com
+		Answer0 ['104.244.42.65', '104.244.42.1']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.794775 DNS poisoning attempt
+		TXID 6716 Request twitter.com
+		Answer0 ['104.244.42.65', '104.244.42.1']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.840045 DNS poisoning attempt
+		TXID 20744 Request amazon.com
+		Answer0 ['176.32.98.166', '205.251.242.103', '176.32.103.205']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.855417 DNS poisoning attempt
+		TXID 63149 Request amazon.com
+		Answer0 ['176.32.98.166', '205.251.242.103', '176.32.103.205']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.866715 DNS poisoning attempt
+		TXID 61522 Request amazon.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['205.251.242.103', '176.32.98.166', '176.32.103.205']
+
+		20171211-12:24:31.879267 DNS poisoning attempt
+		TXID 56090 Request amazon.com
+		Answer0 ['176.32.98.166', '205.251.242.103', '176.32.103.205']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.890352 DNS poisoning attempt
+		TXID 39800 Request amazon.com
+		Answer0 ['176.32.98.166', '205.251.242.103', '176.32.103.205']
+		Answer1 ['192.168.226.131']
+
+		20171211-12:24:31.916919 DNS poisoning attempt
+		TXID 60948 Request amazon.com
+		Answer0 ['192.168.226.131']
+		Answer1 ['205.251.242.103', '176.32.103.205', '176.32.98.166']
+
+		20171211-12:24:31.935560 DNS poisoning attempt
+		TXID 397 Request amazon.com
+		Answer0 ['205.251.242.103', '176.32.98.166', '176.32.103.205']
+		Answer1 ['192.168.226.131']
+
+
+
+References:
+	1. https://scapy.readthedocs.io/en/latest/
+	2. http://www.cs.dartmouth.edu/~sergey/netreads/local/reliable-dns-spoofing-with-python-scapy-nfqueue.html
+	3. https://stackoverflow.com/questions/13249341/surpress-scapy-warning-message-when-importing-the-module
+	4. https://stackoverflow.com/questions/166506/finding-local-ip-addresses-using-pythons-stdlib
+
+
